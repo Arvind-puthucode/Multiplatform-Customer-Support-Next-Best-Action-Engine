@@ -1,0 +1,18 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.3.0",
+    "pydantic>=2.11.7",
+    "clickhouse-connect",
+    "schedule",
+]
+
+[dependency-groups]
+dev = [
+    "dtale>=3.17.0",
+    "itables>=2.4.2",
+    "kagglehub>=0.3.12",
+]
