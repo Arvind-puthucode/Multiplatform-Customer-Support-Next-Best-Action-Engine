@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 import json
 
+from config.config import IngestionConfig
+
 logger = logging.getLogger(__name__)
 
 class ClickHouseManager:
@@ -16,6 +18,22 @@ class ClickHouseManager:
     def __init__(self, config):
         self.config = config
         self.client = None
+    
+    def create_database(self):
+        """Create the ClickHouse database if it does not exist."""
+        try:
+            temp_client = clickhouse_connect.get_client(
+                host=self.config.clickhouse_host,
+                username=self.config.clickhouse_user,
+                password=self.config.clickhouse_password,
+                secure=self.config.clickhouse_secure
+            )
+            temp_client.command(f"CREATE DATABASE IF NOT EXISTS {self.config.clickhouse_database}")
+            temp_client.close()
+            logger.info(f"Database '{self.config.clickhouse_database}' ensured to exist.")
+        except Exception as e:
+            logger.error(f"Failed to create database '{self.config.clickhouse_database}': {e}")
+            raise
     
     def connect(self):
         """Establish ClickHouse connection"""
@@ -441,5 +459,6 @@ if __name__ == "__main__":
     # check and see if connector is connecting
     config = IngestionConfig()
     db_manager = ClickHouseManager(config)
+    # db_manager.create_database()
     db_manager.connect()
     db_manager.disconnect()

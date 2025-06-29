@@ -3,7 +3,8 @@ Configuration management for the ingestion pipeline
 """
 
 import os
-from pydantic import BaseSettings, validator, Field
+from pydantic_settings import BaseSettings
+from pydantic import validator, Field
 from typing import Optional
 
 class IngestionConfig(BaseSettings):
@@ -50,3 +51,4 @@ class IngestionConfig(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
