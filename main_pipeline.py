@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 import os
 
-from config import IngestionConfig
+from config.config import IngestionConfig
 from data_normalizer import TwitterDataNormalizer
 from conversation_threader import ConversationThreader
 from data_validator import DataQualityValidator
@@ -330,6 +330,12 @@ class TwitterIngestionPipeline:
                         total_validation_metrics['issue_counts'].get(issue, 0) + count
                     )
             
+            # Ensure 'created_at_parsed' exists before updating watermark
+            if 'created_at_parsed' not in df.columns:
+                if 'created_at' in df.columns:
+                    df['created_at_parsed'] = pd.to_datetime(df['created_at'], errors='coerce')
+                else:
+                    logger.warning("'created_at' column missing; cannot create 'created_at_parsed'. Watermark update may fail.")
             # Update watermark after successful processing
             self.update_pipeline_watermark(df, self.total_processed)
             
@@ -426,9 +432,8 @@ def main():
     """Example usage of the ingestion pipeline"""
     try:
         # Create configuration from environment
-        config = IngestionConfig.from_env()
-        config.validate()
-        
+        config = IngestionConfig()
+
         # Initialize pipeline
         pipeline = TwitterIngestionPipeline(config)
         pipeline.setup()
