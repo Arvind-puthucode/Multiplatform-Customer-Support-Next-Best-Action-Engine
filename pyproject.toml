@@ -9,6 +9,9 @@ dependencies = [
     "clickhouse-connect",
     "schedule",
     "pydantic-settings>=2.10.1",
+    "supabase>=2.16.0",
+    "postgrest>=1.1.1",
+    "pandas-stubs==2.2.3.250527",
 ]
 
 [dependency-groups]

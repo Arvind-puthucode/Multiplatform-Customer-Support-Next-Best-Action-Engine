@@ -20,7 +20,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/scheduler.log'),
+        logging.FileHandler('riverline_backend/logs/scheduler.log'),
         logging.StreamHandler()
     ]
 )
@@ -37,7 +37,7 @@ class IngestionScheduler:
         self.is_running = False
         
         # Create logs directory
-        Path('logs').mkdir(exist_ok=True)
+        Path('riverline_backend/logs').mkdir(exist_ok=True)
     
     def setup(self):
         """Initialize the pipeline"""
@@ -127,7 +127,7 @@ class IngestionScheduler:
     def _save_run_results(self, results: Dict):
         """Save run results to file"""
         try:
-            results_dir = Path('logs/run_results')
+            results_dir = Path('riverline_backend/logs/run_results')
             results_dir.mkdir(exist_ok=True)
             
             filename = f"run_{results['run_number']:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
