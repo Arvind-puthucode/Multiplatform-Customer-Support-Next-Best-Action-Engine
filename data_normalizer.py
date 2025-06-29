@@ -4,8 +4,12 @@ Data normalization and cleaning utilities
 
 import pandas as pd
 import re
+import warnings
 from typing import List
 import logging
+
+# Suppress datetime parsing warnings
+warnings.filterwarnings('ignore', message='Could not infer format')
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +70,13 @@ class TwitterDataNormalizer:
     
     @staticmethod
     def normalize_timestamp(timestamp_str: str) -> str:
-        """Normalize timestamp to ISO format"""
+        """Normalize timestamp to ISO format with UTC timezone"""
         try:
-            # Parse and convert to standard format
-            parsed_ts = pd.to_datetime(timestamp_str)
+            # Parse and convert to standard format with UTC timezone
+            parsed_ts = pd.to_datetime(timestamp_str, utc=True)
             return parsed_ts.isoformat()
-        except:
-            logger.warning(f"Could not parse timestamp: {timestamp_str}")
+        except Exception as e:
+            logger.warning(f"Could not parse timestamp: {timestamp_str}, error: {e}")
             return timestamp_str
     
     @staticmethod

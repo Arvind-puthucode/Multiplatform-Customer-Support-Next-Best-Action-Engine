@@ -69,13 +69,14 @@ class IngestionScheduler:
                 self.pipeline = TwitterIngestionPipeline(self.config)
                 self.pipeline.setup()
             
-            # Run the ingestion pipeline
+            # Run the ingestion
             result = self.pipeline.run_ingestion()
             
+            # Calculate duration
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
-            # Store run status
+            # Update status
             self.last_run_status = {
                 'run_number': self.run_count,
                 'start_time': start_time.isoformat(),
@@ -83,98 +84,133 @@ class IngestionScheduler:
                 'duration_seconds': duration,
                 'status': result['status'],
                 'records_processed': result.get('records_processed', 0),
-                'quality_score': result.get('quality_score', 0.0),
-                'batches_processed': result.get('batches_processed', 0),
-                'errors': result.get('errors', 0)
+                'error': result.get('error', None)
             }
             
             # Log results
             if result['status'] == 'success':
                 logger.info(
-                    f"Ingestion run #{self.run_count} completed successfully: "
-                    f"{result.get('records_processed', 0)} records in {duration:.1f}s "
-                    f"(Quality: {result.get('quality_score', 0):.3f})"
+                    f"Scheduled run #{self.run_count} completed successfully: "
+                    f"{result.get('records_processed', 0)} records processed in {duration:.1f}s"
                 )
-                
-                # Save detailed results
-                self._save_run_results(result)
-                
             else:
                 logger.error(
-                    f"Ingestion run #{self.run_count} failed: "
-                    f"{result.get('error', 'Unknown error')}"
+                    f"Scheduled run #{self.run_count} failed: {result.get('error', 'Unknown error')}"
                 )
-                
+            
+            # Save run results
+            self._save_run_results(self.last_run_status)
+            
         except Exception as e:
-            logger.error(f"Unexpected error in scheduled ingestion run #{self.run_count}: {e}")
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            
+            logger.error(f"Scheduled run #{self.run_count} crashed after {duration:.1f}s: {e}")
             
             self.last_run_status = {
                 'run_number': self.run_count,
-                'start_time': datetime.now().isoformat(),
+                'start_time': start_time.isoformat(),
+                'end_time': end_time.isoformat(),
+                'duration_seconds': duration,
                 'status': 'error',
-                'error': str(e),
-                'records_processed': 0
+                'records_processed': 0,
+                'error': str(e)
             }
+            
+            self._save_run_results(self.last_run_status)
             
         finally:
             self.is_running = False
+            
+        return self.last_run_status
     
-    def _save_run_results(self, result: Dict):
-        """Save detailed run results to file"""
+    def _save_run_results(self, results: Dict):
+        """Save run results to file"""
         try:
             results_dir = Path('logs/run_results')
             results_dir.mkdir(exist_ok=True)
             
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = results_dir / f"ingestion_run_{timestamp}.json"
+            filename = f"run_{results['run_number']:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            results_file = results_dir / filename
             
-            with open(filename, 'w') as f:
-                json.dump(result, f, indent=2, default=str)
+            with open(results_file, 'w') as f:
+                json.dump(results, f, indent=2)
                 
-            logger.info(f"Run results saved to {filename}")
-            
         except Exception as e:
-            logger.warning(f"Could not save run results: {e}")
+            logger.error(f"Failed to save run results: {e}")
     
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> Dict:
         """Get current scheduler status"""
         return {
-            'scheduler_active': True,
-            'is_currently_running': self.is_running,
+            'is_running': self.is_running,
             'total_runs': self.run_count,
             'last_run': self.last_run_status,
-            'next_run': schedule.next_run().isoformat() if schedule.next_run() else None,
-            'pipeline_config': {
-                'data_source': self.config.data_source_path,
-                'batch_size': self.config.batch_size,
-                'database': self.config.clickhouse_database
-            }
+            'pipeline_ready': self.pipeline is not None
         }
     
-    def manual_run(self) -> Dict:
-        """Manually trigger an ingestion run"""
-        logger.info("Manual ingestion run triggered")
-        self.run_scheduled_ingestion()
-        return self.last_run_status or {'status': 'error', 'error': 'No run status available'}
-    
     def health_check(self) -> Dict:
-        """Perform health check on pipeline components"""
+        """Perform health check on the pipeline and environment"""
         try:
-            if not self.pipeline:
-                self.pipeline = TwitterIngestionPipeline(self.config)
-                self.pipeline.setup()
-            
-            status = self.pipeline.get_pipeline_status()
-            
             health = {
-                'overall_health': 'healthy' if status.get('pipeline_ready') else 'unhealthy',
-                'database_connected': status.get('database_connected', False),
-                'last_watermark': status.get('last_watermark'),
-                'data_source_exists': os.path.exists(self.config.data_source_path),
-                'recent_activity': status.get('recent_ingestion', {}),
-                'timestamp': datetime.now().isoformat()
+                'overall_health': 'healthy',
+                'timestamp': datetime.now().isoformat(),
+                'checks': {}
             }
             
+            # Check if pipeline is initialized
+            health['checks']['pipeline_initialized'] = self.pipeline is not None
+            
+            # Check if data source exists
+            data_source_exists = os.path.exists(self.config.data_source_path)
+            health['checks']['data_source_exists'] = data_source_exists
+            
+            # Check database connectivity
+            if self.pipeline:
+                try:
+                    status = self.pipeline.get_pipeline_status()
+                    health['checks']['database_connected'] = status.get('database_connected', False)
+                    health['checks']['pipeline_ready'] = status.get('pipeline_ready', False)
+                except Exception as e:
+                    health['checks']['database_connected'] = False
+                    health['checks']['pipeline_ready'] = False
+                    health['checks']['database_error'] = str(e)
+            
+            # Check recent activity
+            if self.last_run_status:
+                last_run_time = datetime.fromisoformat(self.last_run_status['start_time'])
+                hours_since_last_run = (datetime.now() - last_run_time).total_seconds() / 3600
+                health['checks']['hours_since_last_run'] = hours_since_last_run
+                health['checks']['last_run_successful'] = self.last_run_status.get('status') == 'success'
+            
+            # Check disk space (basic check)
+            try:
+                import shutil
+                disk_usage = shutil.disk_usage('.')
+                free_space_gb = disk_usage.free / (1024**3)
+                health['checks']['free_disk_space_gb'] = round(free_space_gb, 2)
+                health['checks']['sufficient_disk_space'] = free_space_gb > 1.0  # At least 1GB free
+            except:
+                health['checks']['disk_space_check_failed'] = True
+            
+            # Determine overall health
+            critical_checks = [
+                'pipeline_initialized',
+                'data_source_exists', 
+                'database_connected',
+                'pipeline_ready'
+            ]
+            
+            failed_critical = [check for check in critical_checks 
+                             if not health['checks'].get(check, False)]
+            
+            if failed_critical:
+                health['overall_health'] = 'unhealthy'
+                health['failed_checks'] = failed_critical
+            elif health['checks'].get('hours_since_last_run', 0) > 24:
+                health['overall_health'] = 'warning'
+                health['warning'] = 'No recent ingestion activity'
+            
+            logger.info(f"Health check completed: {health['overall_health']}")
             return health
             
         except Exception as e:

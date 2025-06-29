@@ -6,6 +6,7 @@ Coordinates all components for end-to-end data processing
 import pandas as pd
 import hashlib
 import logging
+import warnings
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 from pathlib import Path
@@ -17,12 +18,53 @@ from conversation_threader import ConversationThreader
 from data_validator import DataQualityValidator
 from database_manager import ClickHouseManager
 
+# Suppress specific warnings
+warnings.filterwarnings('ignore', message='Could not infer format')
+warnings.filterwarnings('ignore', category=UserWarning, module='pandas')
+
+# Set pandas options for better datetime parsing
+pd.set_option('mode.chained_assignment', None)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def parse_datetime_column(series, column_name="timestamp"):
+    """
+    Utility function for consistent datetime parsing across the pipeline
+    """
+    try:
+        # First, try to infer the format automatically
+        if series.dtype == 'object':
+            # Sample a few values to infer format
+            sample_values = series.dropna().head(100)
+            
+            # Common Twitter timestamp formats
+            formats_to_try = [
+                '%Y-%m-%dT%H:%M:%SZ',           # ISO format with Z
+                '%Y-%m-%d %H:%M:%S UTC',         # Standard UTC format
+                '%Y-%m-%d %H:%M:%S',             # Without timezone
+                '%a %b %d %H:%M:%S %z %Y',       # Twitter API format
+                '%Y-%m-%dT%H:%M:%S.%fZ',         # ISO with microseconds
+            ]
+            
+            for fmt in formats_to_try:
+                try:
+                    parsed = pd.to_datetime(sample_values, format=fmt, utc=True)
+                    # If successful, parse the entire series
+                    return pd.to_datetime(series, format=fmt, utc=True, errors='coerce')
+                except:
+                    continue
+        
+        # Fall back to automatic parsing with UTC
+        return pd.to_datetime(series, utc=True, errors='coerce', infer_datetime_format=True)
+        
+    except Exception as e:
+        logger.warning(f"Failed to parse {column_name} column: {e}")
+        return pd.to_datetime(series, utc=True, errors='coerce')
 
 class TwitterIngestionPipeline:
     """Main ingestion pipeline orchestrator"""
@@ -79,6 +121,9 @@ class TwitterIngestionPipeline:
             chunk_size = min(self.config.batch_size, 50000)  # Limit chunk size
             
             for chunk in pd.read_csv(file_path, chunksize=chunk_size):
+                # Parse datetime immediately after loading each chunk
+                if 'created_at' in chunk.columns:
+                    chunk['created_at_parsed'] = parse_datetime_column(chunk['created_at'], 'created_at')
                 chunk_list.append(chunk)
                 
                 # Log progress for large files
@@ -105,13 +150,21 @@ class TwitterIngestionPipeline:
         
         if watermark and watermark.get('last_processed_timestamp'):
             try:
-                # Parse timestamps
-                df['created_at_parsed'] = pd.to_datetime(df['created_at'], errors='coerce')
-                last_timestamp = pd.to_datetime(watermark['last_processed_timestamp'])
+                # Parse timestamps with explicit UTC timezone handling
+                if 'created_at_parsed' not in df.columns:
+                    df['created_at_parsed'] = parse_datetime_column(df['created_at'], 'created_at')
+                
+                # Ensure watermark timestamp is also timezone-aware
+                last_timestamp = pd.to_datetime(
+                    watermark['last_processed_timestamp'],
+                    utc=True
+                )
                 
                 # Filter for records after last processed timestamp
                 original_count = len(df)
-                df = df[df['created_at_parsed'] > last_timestamp].copy()
+                # Use timezone-aware comparison
+                mask = df['created_at_parsed'] > last_timestamp
+                df = df[mask].copy()
                 
                 logger.info(
                     f"Incremental processing: {len(df)} new records out of {original_count} "
@@ -121,6 +174,13 @@ class TwitterIngestionPipeline:
             except Exception as e:
                 logger.warning(f"Could not apply incremental filtering: {e}")
                 logger.info("Proceeding with full dataset")
+                # Create parsed timestamp column even if filtering fails
+                if 'created_at_parsed' not in df.columns:
+                    df['created_at_parsed'] = parse_datetime_column(df['created_at'], 'created_at')
+        else:
+            # No watermark exists, parse timestamps for first run
+            if 'created_at_parsed' not in df.columns:
+                df['created_at_parsed'] = parse_datetime_column(df['created_at'], 'created_at')
         
         return df
     
@@ -174,29 +234,22 @@ class TwitterIngestionPipeline:
                     # Update validation metrics
                     validation_results['quality_scores'].append(quality_score)
                     
-                    for issue in issues:
-                        validation_results['issue_counts'][issue] = (
-                            validation_results['issue_counts'].get(issue, 0) + 1
-                        )
-                    
                     if is_valid:
                         validation_results['valid'] += 1
                         processed_records.append(normalized_record)
                     else:
                         validation_results['invalid'] += 1
-                        logger.debug(f"Invalid record {normalized_record.get('tweet_id', 'unknown')}: {issues}")
+                        logger.debug(f"Invalid record: {issues}")
+                    
+                    # Count issues
+                    for issue in issues:
+                        validation_results['issue_counts'][issue] = (
+                            validation_results['issue_counts'].get(issue, 0) + 1
+                        )
                         
                 except Exception as e:
-                    logger.error(f"Error processing record in batch {batch_id}: {e}")
+                    logger.error(f"Failed to process record in batch {batch_id}: {e}")
                     validation_results['invalid'] += 1
-            
-            # Calculate average quality score
-            if validation_results['quality_scores']:
-                validation_results['avg_quality_score'] = (
-                    sum(validation_results['quality_scores']) / len(validation_results['quality_scores'])
-                )
-            else:
-                validation_results['avg_quality_score'] = 0.0
             
             logger.info(
                 f"Batch {batch_id} processed: {validation_results['valid']} valid, "
@@ -211,7 +264,7 @@ class TwitterIngestionPipeline:
     
     def insert_batch(self, records: List[Dict], batch_id: str, 
                     validation_metrics: Dict) -> Dict:
-        """Insert processed batch into database"""
+        """Insert a batch of records into the database"""
         if not records:
             logger.warning(f"No valid records to insert for batch {batch_id}")
             return {'inserted': 0, 'duplicates': 0, 'errors': 0}
@@ -248,7 +301,12 @@ class TwitterIngestionPipeline:
             df_sorted = df.sort_values('created_at_parsed')
             last_record = df_sorted.iloc[-1]
             
-            last_timestamp = last_record['created_at_parsed'].isoformat()
+            last_timestamp = last_record['created_at_parsed']
+            if hasattr(last_timestamp, 'isoformat'):
+                last_timestamp_str = last_timestamp.isoformat()
+            else:
+                last_timestamp_str = str(last_timestamp)
+            
             last_id = str(last_record['tweet_id'])
             
             # Create batch info
@@ -257,7 +315,7 @@ class TwitterIngestionPipeline:
             # Update watermark
             self.db_manager.update_watermark(
                 data_source=self.config.data_source_type,
-                last_timestamp=last_timestamp,
+                last_timestamp=last_timestamp_str,
                 last_id=last_id,
                 records_count=total_processed,
                 batch_info=batch_info
@@ -333,9 +391,10 @@ class TwitterIngestionPipeline:
             # Ensure 'created_at_parsed' exists before updating watermark
             if 'created_at_parsed' not in df.columns:
                 if 'created_at' in df.columns:
-                    df['created_at_parsed'] = pd.to_datetime(df['created_at'], errors='coerce')
+                    df['created_at_parsed'] = parse_datetime_column(df['created_at'], 'created_at')
                 else:
                     logger.warning("'created_at' column missing; cannot create 'created_at_parsed'. Watermark update may fail.")
+            
             # Update watermark after successful processing
             self.update_pipeline_watermark(df, self.total_processed)
             

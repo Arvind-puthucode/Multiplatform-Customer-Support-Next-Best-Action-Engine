@@ -135,12 +135,12 @@ class DataQualityValidator:
         return bool(re.match(r'^[a-zA-Z0-9_]+$', author_id))
     
     def _is_valid_timestamp(self, timestamp: str) -> bool:
-        """Validate timestamp format"""
+        """Validate timestamp format with improved parsing"""
         if not timestamp:
             return False
         
         try:
-            pd.to_datetime(timestamp)
+            pd.to_datetime(timestamp, utc=True)
             return True
         except:
             return False
@@ -209,44 +209,8 @@ class DataQualityValidator:
             'total_records': total_records,
             'valid_records': valid_records,
             'invalid_records': invalid_records,
-            'validity_rate': valid_records / total_records if total_records > 0 else 0,
             'avg_quality_score': avg_quality_score,
             'quality_scores': quality_scores,
             'issue_counts': issue_counts,
             'record_results': record_results
         }
-    
-    def get_quality_report(self, validation_results: Dict) -> str:
-        """Generate a human-readable quality report"""
-        results = validation_results
-        
-        report = f"""
-Data Quality Report
-==================
-Total Records: {results['total_records']}
-Valid Records: {results['valid_records']} ({results['validity_rate']:.1%})
-Invalid Records: {results['invalid_records']}
-Average Quality Score: {results['avg_quality_score']:.3f}
-
-Top Issues:
-"""
-        
-        # Sort issues by frequency
-        sorted_issues = sorted(
-            results['issue_counts'].items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
-        
-        for issue, count in sorted_issues[:10]:  # Top 10 issues
-            report += f"  - {issue}: {count} occurrences\n"
-        
-        # Quality score distribution
-        scores = results['quality_scores']
-        if scores:
-            report += f"\nQuality Score Distribution:\n"
-            report += f"  Min: {min(scores):.3f}\n"
-            report += f"  Max: {max(scores):.3f}\n"
-            report += f"  Median: {sorted(scores)[len(scores)//2]:.3f}\n"
-        
-        return report
