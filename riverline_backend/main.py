@@ -1,17 +1,20 @@
 
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv() # Load environment variables from .env file
 import uuid
-from ..pipeline.processors.data_processor import DataProcessor
-from ..pipeline.connectors.supabase_connector import SupabaseConnector
-from ..pipeline.connectors.clickhouse_connector import ClickHouseConnector
-from ..nba.conversation_processor import ConversationProcessor
-from ..nba.nba_engine import NBAEngine
+from pipeline.data_engine_factory import DataEngineFactory
+from pipeline.connectors.supabase_connector import SupabaseConnector
+from pipeline.connectors.clickhouse_connector import ClickHouseConnector
+from nba.conversation_processor import ConversationProcessor
+from nba.nba_engine import NBAEngine
 
 class Pipeline:
     def __init__(self, config):
         self.config = config
-        self.data_processor = DataProcessor(config['data_file']) if 'data_file' in config else None
+        self.data_engine = DataEngineFactory.get_engine(self.config) if 'data_file' in config else None
         self.db_connector = self._get_db_connector()
 
     def _get_db_connector(self):
@@ -32,7 +35,7 @@ class Pipeline:
             raise ValueError(f"Unsupported database target: {db_target}")
 
     def run(self):
-        if not self.data_processor:
+        if not self.data_engine:
             print("No data_file provided in config. Skipping data processing.")
             return
 
@@ -63,35 +66,47 @@ class Pipeline:
             print(f"Last watermark: {last_watermark}")
 
             # 1. Read data
-            df = self.data_processor.read_data(last_watermark)
-            print(f"DataFrame size after reading and filtering: {len(df)}")
+            df = self.data_engine.read_data(self.config['data_file'], last_watermark)
+            if self.data_engine.__class__.__name__ == "SparkDataEngine":
+                df_count = df.count()
+                print(f"DataFrame size after reading and filtering: {df_count}")
+            else:
+                print(f"DataFrame size after reading and filtering: {len(df)}")
 
             # 2. Normalize data
-            df = self.data_processor.normalize_data(df)
+            df = self.data_engine.normalize_data(df)
 
             # 3. Quality check
-            df = self.data_processor.quality_check(df)
+            df = self.data_engine.quality_check(df)
 
             # 4. Get records
-            records = self.data_processor.get_records(df)
-            records_processed = len(records)
+            records = self.data_engine.get_records(df)
+            if self.data_engine.__class__.__name__ == "SparkDataEngine":
+                records_processed = df.count()
+            else:
+                records_processed = len(records)
 
             if records_processed > 0:
+                print('records length needed to be processed',records_processed)
                 # 5. Connect to DB
+
                 self.db_connector.connect()
 
-                # 6. Create tables if they don't exist (SupabaseConnector assumes this)
+                # 6. Create tables if they don't exist
                 self.db_connector.create_tables()
 
                 # 7. Batch insert
                 self.db_connector.batch_insert(records)
 
                 # Update watermark
-                latest_timestamp = df['interaction_timestamp'].max()
+                if self.data_engine.__class__.__name__ == "SparkDataEngine":
+                    latest_timestamp = df.agg({"interaction_timestamp": "max"}).collect()[0][0]
+                else:
+                    latest_timestamp = df['interaction_timestamp'].max()
                 self.db_connector.update_watermark(
                     pipeline_name="data_ingestion",
                     platform_type="twitter",
-                    timestamp=latest_timestamp,
+                    timestamp=latest_timestamp.isoformat(),
                     records_processed=records_processed,
                     status="completed"
                 )
@@ -102,7 +117,7 @@ class Pipeline:
             error_message = str(e)
             print(f"Pipeline run failed: {error_message}")
         finally:
-            end_time = datetime.now().isoformat()
+            end_time = datetime.now()
             end_data = {
                 "end_timestamp": end_time,
                 "status": status,
@@ -154,12 +169,31 @@ class Pipeline:
             print(p)
 
 if __name__ == '__main__':
-    # Example usage:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the Riverline data pipeline.")
+    parser.add_argument("--data_file", type=str, default="/home/arvind/personal-projects/riverline/backend/riverline_backend/data/10/sample.csv",
+                        help="Path to the input CSV data file.")
+    parser.add_argument("--db", type=str, default="supabase", choices=["supabase", "clickhouse"],
+                        help="Database target: 'supabase' or 'clickhouse'.")
+    parser.add_argument("--action", type=str, default="run_pipeline",
+                        choices=["run_pipeline", "process_nba_data", "run_nba_predictions"],
+                        help="Action to perform: 'run_pipeline', 'process_nba_data', or 'run_nba_predictions'.")
+
+    args = parser.parse_args()
+
     config = {
-        'data_file': '/home/arvind/personal-projects/riverline/backend/riverline_backend/data/10/sample.csv',
+        'data_file': args.data_file,
         'database': {
-            'target': 'supabase' # or 'clickhouse'
+            'target': args.db
         }
     }
+
     pipeline = Pipeline(config)
-    pipeline.run()
+
+    if args.action == "run_pipeline":
+        pipeline.run()
+    elif args.action == "process_nba_data":
+        pipeline.process_nba_data()
+    elif args.action == "run_nba_predictions":
+        pipeline.run_nba_predictions()

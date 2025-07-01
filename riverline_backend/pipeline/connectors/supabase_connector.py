@@ -3,6 +3,7 @@ from typing import List, Dict, Optional
 from supabase import create_client, Client
 from postgrest import APIResponse
 from .db_connector import DatabaseConnector
+import json
 from datetime import datetime
 import uuid
 
@@ -26,7 +27,26 @@ class SupabaseConnector(DatabaseConnector):
 
     def batch_insert(self, records: List[Dict]) -> bool:
         try:
-            response: APIResponse = self.client.table('interactions').insert(records).execute()
+            processed_records = []
+            for record in records:
+                processed_record = record.copy()
+                # Ensure all datetime objects are ISO formatted strings
+                for key, value in processed_record.items():
+                    if isinstance(value, datetime):
+                        processed_record[key] = value.isoformat()
+                    elif isinstance(value, dict):
+                        processed_record[key] = json.dumps(value)
+                
+                # Filter out any columns not in the target schema
+                # This is a safeguard against schema mismatches
+                valid_columns = [
+                    'interaction_id', 'external_id', 'platform_type', 'participant_external_id',
+                    'content_text', 'content_metadata', 'interaction_timestamp', 'parent_interaction_id',
+                    'platform_metadata', 'processing_metadata', 'created_at'
+                ]
+                filtered_record = {k: v for k, v in processed_record.items() if k in valid_columns}
+                processed_records.append(filtered_record)
+            response: APIResponse = self.client.table('interactions').insert(processed_records).execute()
             return response.data is not None
         except Exception as e:
             print(f"Error batch inserting records: {e}")
@@ -117,7 +137,13 @@ class SupabaseConnector(DatabaseConnector):
 
     def log_pipeline_run_start(self, run_data: Dict) -> str:
         try:
-            response = self.client.table('pipeline_runs').insert(run_data).execute()
+            processed_run_data = run_data.copy()
+            for key, value in processed_run_data.items():
+                if isinstance(value, datetime):
+                    processed_run_data[key] = value.isoformat()
+                elif isinstance(value, dict):
+                    processed_run_data[key] = json.dumps(value)
+            response = self.client.table('pipeline_runs').insert(processed_run_data).execute()
             if response.data:
                 return response.data[0]['run_id']
             return None
@@ -127,7 +153,13 @@ class SupabaseConnector(DatabaseConnector):
 
     def log_pipeline_run_end(self, run_id: str, end_data: Dict) -> bool:
         try:
-            response = self.client.table('pipeline_runs').update(end_data).eq('run_id', run_id).execute()
+            processed_end_data = end_data.copy()
+            for key, value in processed_end_data.items():
+                if isinstance(value, datetime):
+                    processed_end_data[key] = value.isoformat()
+                elif isinstance(value, dict):
+                    processed_end_data[key] = json.dumps(value)
+            response = self.client.table('pipeline_runs').update(processed_end_data).eq('run_id', run_id).execute()
             return response.data is not None
         except Exception as e:
             print(f"Error logging pipeline run end: {e}")

@@ -13,6 +13,7 @@ dependencies = [
     "postgrest>=1.1.1",
     "pandas-stubs==2.2.3.250527",
     "python-dotenv>=0.21.0",
+    "pyspark>=4.0.0",
 ]
 
 [dependency-groups]
