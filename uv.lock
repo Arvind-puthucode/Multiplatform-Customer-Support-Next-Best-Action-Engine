@@ -51,6 +51,7 @@ dependencies = [
     { name = "postgrest" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "schedule" },
     { name = "supabase" },
 ]
@@ -70,6 +71,7 @@ requires-dist = [
     { name = "postgrest", specifier = ">=1.1.1" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
+    { name = "python-dotenv", specifier = ">=0.21.0" },
     { name = "schedule" },
     { name = "supabase", specifier = ">=2.16.0" },
 ]
