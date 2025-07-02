@@ -87,14 +87,16 @@ def determine_channel_and_timing(customer_profile: Dict, conversation_history: L
     
     # Rule 2: Old unresolved issue → Email followup  
     if conversation_history:
-        last_interaction = max(conversation_history, key=lambda x: x.get('interaction_timestamp', ''))
-        hours_since_last = calculate_hours_ago(last_interaction.get('interaction_timestamp', ''))
-        
-        if hours_since_last > 24:
-            return {
-                'channel': 'email_reply',
-                'reasoning': f'Issue dormant for {hours_since_last:.1f} hours - email follow-up needed'
-            }
+        customer_interactions = [i for i in conversation_history if i.get('participant_external_id') == customer_profile.get('customer_id')]
+        if customer_interactions:
+            last_customer_interaction = max(customer_interactions, key=lambda x: x.get('interaction_timestamp', ''))
+            hours_since_last_customer_interaction = calculate_hours_ago(last_customer_interaction.get('interaction_timestamp', ''))
+            
+            if hours_since_last_customer_interaction > 24:
+                return {
+                    'channel': 'email_reply',
+                    'reasoning': f'Issue dormant for {hours_since_last_customer_interaction:.1f} hours - email follow-up needed. Last interaction was from customer.'
+                }
     
     # Rule 3: High interaction frequency → Twitter reply (customer is active)
     recent_interactions = count_interactions_last_24h(conversation_history)

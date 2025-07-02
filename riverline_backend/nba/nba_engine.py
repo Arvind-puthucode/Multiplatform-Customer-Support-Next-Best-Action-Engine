@@ -31,9 +31,21 @@ class NBAEngine:
             return float(obj)
         return obj
 
-    def _enhance_with_llm(self, rule_output: Dict, conversation_context: Dict,customer_id) -> Dict:
+    def _enhance_with_llm(self, rule_output: Dict, conversation_context: Dict,customer_id, conversation_history: List[Dict]) -> Dict:
         # Convert any Decimal objects in conversation_context to floats
         processed_conversation_context = self._convert_decimals_to_floats(conversation_context)
+
+        # Format conversation history for LLM
+        formatted_history = ""
+        if conversation_history:
+            for i, interaction in enumerate(conversation_history):
+                participant = interaction.get('participant_external_id', 'Unknown')
+                content = interaction.get('content_text', 'No content')
+                timestamp = interaction.get('interaction_timestamp', 'No timestamp')
+                formatted_history += f"Interaction {i+1} ({timestamp}) by {participant}: {content}"
+
+        else:
+            formatted_history = "No detailed conversation history available."
         prompt = f"""
         You are an AI assistant for Riverline, tasked with determining the Next Best Action for open customer issues.
         
@@ -41,11 +53,14 @@ class NBAEngine:
         
         Customer ID: {customer_id}
         Conversation Summary: {processed_conversation_context.get('summary', '')}
+        Conversation Topic: {processed_conversation_context.get('conversation_topic', 'N/A')}
+        Conversation History:
+        {formatted_history}
         Rule-based Decision: {rule_output['channel']} - {rule_output['reasoning']}
         
         Instructions:
-        1.  **Message (for the customer):** Create a personalized, concise, and helpful message. Use the provided Customer ID instead of a generic name placeholder. The message should clearly communicate the next step or acknowledgment.
-        2.  **Reasoning (for internal use):** Provide a detailed and crisp explanation of *why* this channel and timing are best for this specific customer and issue. This reasoning should be insightful enough to help improve future rules and prompts. Focus on the underlying logic and customer behavior.
+        1.  **Message (for the customer):** Create a personalized, concise, and helpful message. Use the provided Customer ID. Reference specific details from the conversation history if relevant and appropriate. The message should clearly communicate the next step or acknowledgment.
+        2.  **Reasoning (for internal use):** Provide a detailed and crisp explanation of *why* this channel and timing are best for this specific customer and issue. This reasoning should be insightful enough to help improve future rules and prompts. Directly leverage details from the conversation history, customer profile, and conversation topic to justify the decision. Focus on the underlying logic and customer behavior.
         
         Keep the same channel choice as the rule-based decision.
         
@@ -85,6 +100,10 @@ class NBAEngine:
         if not customer_profile:
             raise ValueError(f"Customer profile not found for ID: {customer_id}")
 
+        conversation_summary = self.db_connector.fetch_customer_conversation(customer_id)
+        if not isinstance(conversation_summary, dict):
+            conversation_summary = {} # Ensure it's a dictionary
+
         conversation_history = self.db_connector.fetch_customer_interactions(customer_id)
         conversation_summary = self.db_connector.fetch_customer_conversation(customer_id)
         if not isinstance(conversation_summary, dict):
@@ -98,7 +117,7 @@ class NBAEngine:
 
         print( )
         # 3. LLM Enhancement
-        enhanced_output = self._enhance_with_llm(rule_output, conversation_summary,customer_id)
+        enhanced_output = self._enhance_with_llm(rule_output, conversation_summary,customer_id, conversation_history)
 
         # Combine results
         prediction = {

@@ -134,9 +134,9 @@ class SupabaseConnector(DatabaseConnector):
         # Implementation for health check
         pass
 
-    def fetch_interactions(self) -> List[Dict]:
+    def fetch_customer_interactions(self, customer_id: str) -> List[Dict]:
         try:
-            response = self.client.table('interactions').select('*').execute()
+            response = self.client.table('interactions').select('*').eq('participant_external_id', customer_id).order('interaction_timestamp', desc=False).execute()
             return response.data
         except Exception as e:
             print(f"Error fetching interactions: {e}")
