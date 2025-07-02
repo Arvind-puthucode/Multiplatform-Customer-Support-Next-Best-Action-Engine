@@ -96,23 +96,78 @@ The `DATA_ENGINE` environment variable determines which processing engine is use
 
 ## 📈 Next Best Action (NBA)
 
-The project also includes functionalities for processing and generating Next Best Action predictions.
+The project includes functionalities for processing and generating Next Best Action (NBA) predictions, leveraging both rule-based logic and LLM enhancement.
+
+### NBA Modes
+
+There are two primary modes for running the NBA engine:
+
+1.  **Batch Processing (for Evaluation)**: Designed for processing a large number of customer profiles and exporting predictions for analysis.
+2.  **API Server (for Production Use)**: Provides a FastAPI endpoint for real-time, single-customer NBA predictions.
 
 ### Running NBA Processing
 
-This action processes interactions to generate conversations and customer profiles, storing them in the selected database.
+This action processes raw interactions to generate aggregated conversation threads and customer profiles, storing them in the selected database. This step is a prerequisite for running NBA predictions.
 
 ```bash
 python main.py --action process_nba_data --db <database_target>
 ```
 
-### Running NBA Predictions
+### Running NBA Predictions (Batch Mode)
 
-This action fetches processed data and runs the NBA prediction engine.
+This action fetches processed customer data and runs the NBA prediction engine in batch mode. It's suitable for evaluation and generating predictions for a specified number of customers.
+
+**Command Structure:**
 
 ```bash
-python main.py --action run_nba_predictions --db <database_target>
+python main.py --action run_nba_predictions --db <database_target> [--customers <limit>]
 ```
+
+**Parameters:**
+
+*   `--action run_nba_predictions`: Specifies the batch NBA prediction mode.
+*   `--db <database_target>`:
+    *   `supabase`: Uses the Supabase (PostgreSQL) database as the data source.
+    *   `clickhouse`: Uses the ClickHouse database as the data source.
+*   `--customers <limit>` (Optional): Limits the number of customer profiles to process. If omitted, all available customer profiles will be processed. This is useful for controlling the scope of evaluation runs.
+
+**Example:**
+
+*   **Process 1000 customers for evaluation using ClickHouse:**
+    ```bash
+    python main.py --action run_nba_predictions --db clickhouse --customers 1000
+    ```
+
+### Running NBA API Server
+
+This action starts a FastAPI server that exposes an endpoint for real-time NBA predictions for individual customers. This is intended for production deployment.
+
+**Command Structure:**
+
+```bash
+python main.py --action run_nba_api --db <database_target>
+```
+
+**Parameters:**
+
+*   `--action run_nba_api`: Specifies that the FastAPI NBA prediction server should be started.
+*   `--db <database_target>`:
+    *   `supabase`: Configures the API to fetch data from Supabase.
+    *   `clickhouse`: Configures the API to fetch data from ClickHouse.
+
+**Example:**
+
+*   **Start NBA API server using Supabase:**
+    ```bash
+    python main.py --action run_nba_api --db supabase
+    ```
+
+*   **Example API Call (after server is running):**
+    ```bash
+    curl -X POST "http://localhost:8000/predict_nba" \
+         -H "Content-Type: application/json" \
+         -d '{"customer_id": "twitter_user_123"}'
+    ```
 
 ## 🧪 Evaluation
 

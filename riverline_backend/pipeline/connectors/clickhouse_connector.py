@@ -5,6 +5,7 @@ from datetime import datetime
 import uuid
 from .db_connector import DatabaseConnector
 
+
 class ClickHouseConnector(DatabaseConnector):
     def __init__(self, host: str, port: int, user: str, password: str):
         self.client = clickhouse_connect.get_client(host=host, port=port, user=user, password=password)
@@ -115,7 +116,7 @@ class ClickHouseConnector(DatabaseConnector):
                 processed_record['participant_external_id'] = str(processed_record.get('participant_external_id', ''))
                 processed_record['parent_interaction_id'] = str(processed_record.get('parent_interaction_id', ''))
                 processed_record['created_at'] = processed_record.get('created_at', datetime.now())
-                
+
                 for key, value in processed_record.items():
                     if isinstance(value, datetime):
                         processed_record[key] = value.isoformat()
@@ -163,7 +164,8 @@ class ClickHouseConnector(DatabaseConnector):
             print(f"Error getting last watermark from ClickHouse: {e}")
             return None
 
-    def update_watermark(self, pipeline_name: str, platform_type: str, timestamp: str, records_processed: int, status: str) -> bool:
+    def update_watermark(self, pipeline_name: str, platform_type: str, timestamp: str, records_processed: int,
+                         status: str) -> bool:
         try:
             # Always insert a new watermark record
             column_names = [
@@ -195,7 +197,8 @@ class ClickHouseConnector(DatabaseConnector):
         try:
             processed_run_data = run_data.copy()
             processed_run_data['config_snapshot'] = json.dumps(processed_run_data.get('config_snapshot', {}))
-            processed_run_data['end_timestamp'] = processed_run_data.get('end_timestamp', datetime(1970, 1, 1)).isoformat() # Default for nullable
+            processed_run_data['end_timestamp'] = processed_run_data.get('end_timestamp', datetime(1970, 1,
+                                                                                                   1)).isoformat()  # Default for nullable
             processed_run_data['records_processed'] = processed_run_data.get('records_processed', 0)
             processed_run_data['error_message'] = processed_run_data.get('error_message', '')
             processed_run_data['created_at'] = processed_run_data.get('created_at', datetime.now()).isoformat()
@@ -236,14 +239,15 @@ class ClickHouseConnector(DatabaseConnector):
             processed_end_data['records_processed'] = processed_end_data.get('records_processed', 0)
 
             # Fetch the original run data to merge with end_data
-            original_run_data_result = self.client.query(f"SELECT * FROM pipeline_runs WHERE run_id = '{run_id}' ORDER BY created_at DESC LIMIT 1")
+            original_run_data_result = self.client.query(
+                f"SELECT * FROM pipeline_runs WHERE run_id = '{run_id}' ORDER BY created_at DESC LIMIT 1")
 
             if original_run_data_result.result_rows:
                 columns = original_run_data_result.column_names
                 original_run_dict = dict(zip(columns, original_run_data_result.result_rows[0]))
-                
+
                 merged_data = {**original_run_dict, **processed_end_data}
-                
+
                 # Ensure timestamps are in correct format for ClickHouse
                 for ts_key in ['start_timestamp', 'end_timestamp', 'created_at']:
                     if ts_key in merged_data:
@@ -252,12 +256,13 @@ class ClickHouseConnector(DatabaseConnector):
                         elif isinstance(merged_data[ts_key], str):
                             pass
                         else:
-                            merged_data[ts_key] = datetime(1970, 1, 1).isoformat() # Default for other types
+                            merged_data[ts_key] = datetime(1970, 1, 1).isoformat()  # Default for other types
 
                 # Ensure all other fields are present and correctly formatted
                 merged_data['error_message'] = str(merged_data.get('error_message', ''))
                 merged_data['config_snapshot'] = json.dumps(merged_data.get('config_snapshot', {}))
-                merged_data['performance_metrics'] = json.dumps(merged_data.get('performance_metrics', {})) # This field is not in schema, but was in original code
+                merged_data['performance_metrics'] = json.dumps(
+                    merged_data.get('performance_metrics', {}))  # This field is not in schema, but was in original code
 
                 # Convert merged_data to list of lists for insertion
                 column_names = [
@@ -284,7 +289,7 @@ class ClickHouseConnector(DatabaseConnector):
                 # If original not found, create a new record with available end_data and run_id
                 new_record = {
                     'run_id': run_id,
-                    'pipeline_name': "unknown", # Default if original not found
+                    'pipeline_name': "unknown",  # Default if original not found
                     'run_type': "unknown",
                     'database_target': "unknown",
                     'start_timestamp': datetime(1970, 1, 1).isoformat(),
@@ -321,9 +326,13 @@ class ClickHouseConnector(DatabaseConnector):
             print(f"Error logging pipeline run end to ClickHouse: {e}")
             return False
 
-    def fetch_interactions(self) -> List[Dict]:
+    def fetch_interactions(self, limit: Optional[int] = None) -> List[Dict]:
+        """Fetch interactions, optionally limited by count."""
         try:
-            result = self.client.query("SELECT * FROM interactions")
+            query = "SELECT * FROM interactions"
+            if limit is not None:
+                query += f" LIMIT {limit}"
+            result = self.client.query(query)
             if not result.result_rows:
                 return []
             columns = result.column_names
@@ -332,17 +341,79 @@ class ClickHouseConnector(DatabaseConnector):
             print(f"Error fetching interactions from ClickHouse: {e}")
             return []
 
-    def fetch_customer_profiles(self) -> List[Dict]:
+    def fetch_customer_profiles(self, limit: Optional[int] = None) -> List[Dict]:
+        """Fetch customer profiles, optionally limited by count."""
         try:
-            result = self.client.query("SELECT * FROM customer_profiles") # Assuming customer_profiles table exists in ClickHouse
+            query = "SELECT * FROM customer_profiles"
+            if limit is not None:
+                query += f" LIMIT {limit}"
+            result = self.client.query(query)
             if not result.result_rows:
                 return []
             columns = result.column_names
-            return [dict(zip(columns, row)) for row in result.result_rows]
+            profiles = []
+            for row in result.result_rows:
+                record = dict(zip(columns, row))
+                # Convert datetime fields to ISO strings
+                for key in ['last_interaction_timestamp', 'created_at']:
+                    if key in record and isinstance(record[key], datetime):
+                        record[key] = record[key].isoformat()
+                profiles.append(record)
+            return profiles
         except Exception as e:
-            print(f"Error fetching customer profiles from ClickHouse: {e}")
+            print(f"Error fetching customer profiles: {e}")
             return []
-
+    def fetch_customer_profile(self, customer_id: str) -> Dict:
+        try:
+            query = f"SELECT * FROM customer_profiles WHERE customer_id = '{customer_id}'"
+            result = self.client.query(query)
+            if not result.result_rows:
+                return None
+            columns = result.column_names
+            record = dict(zip(columns, result.result_rows[0]))
+            # Convert datetime fields to ISO strings
+            for key in ['last_interaction_timestamp', 'created_at']:
+                if key in record and isinstance(record[key], datetime):
+                    record[key] = record[key].isoformat()
+            return record
+        except Exception as e:
+            print(f"Error fetching customer profile: {e}")
+            return None
+    def fetch_customer_interactions(self, customer_id: str) -> List[Dict]:
+        try:
+            query = f"SELECT * FROM interactions WHERE external_id = '{customer_id}'"
+            result = self.client.query(query)
+            if not result.result_rows:
+                return []
+            columns = result.column_names
+            interactions = []
+            for row in result.result_rows:
+                record = dict(zip(columns, row))
+                # Convert datetime fields to ISO strings
+                for key in ['interaction_timestamp', 'created_at']:
+                    if key in record and isinstance(record[key], datetime):
+                        record[key] = record[key].isoformat()
+                interactions.append(record)
+            return interactions
+        except Exception as e:
+            print(f"Error fetching customer interactions: {e}")
+            return []
+    def fetch_customer_conversation(self, customer_id: str) -> Dict:
+        try:
+            query = f"SELECT * FROM conversations WHERE customer_id = '{customer_id}'"
+            result = self.client.query(query)
+            if not result.result_rows:
+                return None
+            columns = result.column_names
+            record = dict(zip(columns, result.result_rows[0]))
+            # Convert datetime fields to ISO strings
+            for key in ['conversation_start_timestamp', 'conversation_end_timestamp', 'created_at']:
+                if key in record and isinstance(record[key], datetime):
+                    record[key] = record[key].isoformat()
+            return record
+        except Exception as e:
+            print(f"Error fetching customer conversation: {e}")
+            return None
     def batch_insert_conversations(self, records: List[Dict]) -> bool:
         try:
             processed_records = []
@@ -397,7 +468,7 @@ class ClickHouseConnector(DatabaseConnector):
                     elif isinstance(value, dict):
                         processed_record[key] = json.dumps(value)
                 processed_records.append(processed_record)
-            
+
             column_names = [
                 'customer_id', 'platform_accounts', 'interaction_history_summary',
                 'behavioral_tags', 'preferred_channels', 'avg_response_time',

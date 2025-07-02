@@ -1,10 +1,16 @@
 
 import os
 from datetime import datetime
+
+import fastapi
 from dotenv import load_dotenv
+from typing import List, Dict
+
+from fastapi import FastAPI
 
 load_dotenv() # Load environment variables from .env file
 import uuid
+import pandas as pd
 from pipeline.data_engine_factory import DataEngineFactory
 from pipeline.connectors.supabase_connector import SupabaseConnector
 from pipeline.connectors.clickhouse_connector import ClickHouseConnector
@@ -140,33 +146,58 @@ class Pipeline:
         # 4. Insert into customer_profiles table
         self.db_connector.batch_insert_customer_profiles(processed_data['customer_profiles'])
 
-    def run_nba_predictions(self):
-        # Fetch all interactions and customer profiles
-        interactions = self.db_connector.fetch_interactions()
-        customer_profiles = self.db_connector.fetch_customer_profiles() # Need to implement this in SupabaseConnector
-
-        # Group interactions by customer_id
-        customer_interactions = {}
-        for interaction in interactions:
-            customer_id = interaction.get('participant_external_id')
-            if customer_id not in customer_interactions:
-                customer_interactions[customer_id] = []
-            customer_interactions[customer_id].append(interaction)
-
-        nba_engine = NBAEngine()
+    def run_nba_predictions(self, limit_customers=None):
+        # Efficient customer sampling (not fetch all!)
+        customer_profiles = self.db_connector.fetch_customer_profiles(limit=limit_customers)
+        
+        nba_engine = NBAEngine(self.db_connector)
         predictions = []
-
-        # Generate predictions for each customer
-        for customer_profile in customer_profiles:
+        
+        print(f"Processing NBA predictions for {len(customer_profiles)} customers...")
+        
+        for i, customer_profile in enumerate(customer_profiles):
             customer_id = customer_profile.get('customer_id')
-            conversation_history = customer_interactions.get(customer_id, [])
             
-            prediction = nba_engine.predict_action(customer_profile, conversation_history)
-            predictions.append(prediction)
+            try:
+                prediction = nba_engine.predict_for_customer(customer_id)
+                predictions.append(prediction)
+                
+                if (i + 1) % 100 == 0:
+                    print(f"Processed {i + 1}/{len(customer_profiles)} customers")
+                    
+            except Exception as e:
+                print(f"Error processing customer {customer_id}: {e}")
+                continue
+        
+        # Export results
+        if predictions:
+            self.export_predictions_csv(predictions)
+            print(f"NBA predictions exported for {len(predictions)} customers")
+        
+        return predictions
 
-        # Print predictions (for MVP, later save to CSV)
-        for p in predictions:
-            print(p)
+    def export_predictions_csv(self, predictions: List[Dict]):
+        # Simple CSV export for now
+        if not predictions:
+            print("No predictions to export.")
+            return
+        
+        df = pd.DataFrame(predictions)
+        output_path = "nba_predictions.csv"
+        df.to_csv(output_path, index=False)
+        print(f"Predictions exported to {output_path}")
+
+    def run_nba_api(self,port:int = 8080):
+        """Start FastAPI server for single customer predictions"""
+        import uvicorn
+        from api.nba_api import create_app
+        
+        # Pass db_connector config to FastAPI app
+        os.environ["DB_TARGET"] = self.config['database']['target']
+        app = create_app(self.config['database']['target'])
+        uvicorn.run(app, host="0.0.0.0", port=port)
+
+
 
 if __name__ == '__main__':
     import argparse
@@ -177,8 +208,10 @@ if __name__ == '__main__':
     parser.add_argument("--db", type=str, default="supabase", choices=["supabase", "clickhouse"],
                         help="Database target: 'supabase' or 'clickhouse'.")
     parser.add_argument("--action", type=str, default="run_pipeline",
-                        choices=["run_pipeline", "process_nba_data", "run_nba_predictions"],
-                        help="Action to perform: 'run_pipeline', 'process_nba_data', or 'run_nba_predictions'.")
+                        choices=["run_pipeline", "process_nba_data", "run_nba_predictions", "run_nba_api"],
+                        help="Action to perform: 'run_pipeline', 'process_nba_data', 'run_nba_predictions', or 'run_nba_api'.")
+    parser.add_argument("--customers", type=int, default=None,
+                        help="Limit number of customers for NBA predictions (for batch processing).")
 
     args = parser.parse_args()
 
@@ -196,4 +229,6 @@ if __name__ == '__main__':
     elif args.action == "process_nba_data":
         pipeline.process_nba_data()
     elif args.action == "run_nba_predictions":
-        pipeline.run_nba_predictions()
+        pipeline.run_nba_predictions(limit_customers=args.customers)
+    elif args.action == "run_nba_api":
+        pipeline.run_nba_api()
