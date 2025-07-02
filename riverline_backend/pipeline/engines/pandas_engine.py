@@ -14,7 +14,7 @@ class PandasDataEngine(BaseDataEngine):
             df = pd.read_csv(file_path, encoding='latin-1')
             if last_processed_timestamp:
                 print(f"Filtering data with last_processed_timestamp: {last_processed_timestamp}")
-                df['created_at'] = pd.to_datetime(df['created_at'], format="%a %b %d %H:%M:%S %z %Y", utc=True)
+                df['created_at'] = pd.to_datetime(df['created_at'], format="%a %b %d %H:%M:%S %z %Y", utc=True, errors='coerce')
                 df = df[df['created_at'] > pd.to_datetime(last_processed_timestamp, utc=True)]
                 print(f"DataFrame size after filtering in read_data: {len(df)}")
             return df

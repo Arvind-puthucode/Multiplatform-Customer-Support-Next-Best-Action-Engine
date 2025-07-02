@@ -8,8 +8,9 @@ from datetime import datetime
 import uuid
 
 class SupabaseConnector(DatabaseConnector):
-    def __init__(self, url: str, key: str):
+    def __init__(self, url: str, key: str, batch_size: int = 1000):
         self.client: Client = create_client(url, key)
+        self.batch_size = batch_size
 
     def connect(self) -> bool:
         # Supabase client doesn't have a connect method, connection is on-demand
@@ -27,27 +28,33 @@ class SupabaseConnector(DatabaseConnector):
 
     def batch_insert(self, records: List[Dict]) -> bool:
         try:
-            processed_records = []
-            for record in records:
-                processed_record = record.copy()
-                # Ensure all datetime objects are ISO formatted strings
-                for key, value in processed_record.items():
-                    if isinstance(value, datetime):
-                        processed_record[key] = value.isoformat()
-                    elif isinstance(value, dict):
-                        processed_record[key] = json.dumps(value)
+            all_successful = True
+            for i in range(0, len(records), self.batch_size):
+                batch = records[i:i + self.batch_size]
+                processed_batch = []
+                for record in batch:
+                    processed_record = record.copy()
+                    # Ensure all datetime objects are ISO formatted strings
+                    for key, value in processed_record.items():
+                        if isinstance(value, datetime):
+                            processed_record[key] = value.isoformat()
+                        elif isinstance(value, dict):
+                            processed_record[key] = json.dumps(value)
+                    
+                    # Filter out any columns not in the target schema
+                    # This is a safeguard against schema mismatches
+                    valid_columns = [
+                        'interaction_id', 'external_id', 'platform_type', 'participant_external_id',
+                        'content_text', 'content_metadata', 'interaction_timestamp', 'parent_interaction_id',
+                        'platform_metadata', 'processing_metadata', 'created_at'
+                    ]
+                    filtered_record = {k: v for k, v in processed_record.items() if k in valid_columns}
+                    processed_batch.append(filtered_record)
                 
-                # Filter out any columns not in the target schema
-                # This is a safeguard against schema mismatches
-                valid_columns = [
-                    'interaction_id', 'external_id', 'platform_type', 'participant_external_id',
-                    'content_text', 'content_metadata', 'interaction_timestamp', 'parent_interaction_id',
-                    'platform_metadata', 'processing_metadata', 'created_at'
-                ]
-                filtered_record = {k: v for k, v in processed_record.items() if k in valid_columns}
-                processed_records.append(filtered_record)
-            response: APIResponse = self.client.table('interactions').insert(processed_records).execute()
-            return response.data is not None
+                response: APIResponse = self.client.table('interactions').insert(processed_batch).execute()
+                if response.data is None:
+                    all_successful = False
+            return all_successful
         except Exception as e:
             print(f"Error batch inserting records: {e}")
             return False

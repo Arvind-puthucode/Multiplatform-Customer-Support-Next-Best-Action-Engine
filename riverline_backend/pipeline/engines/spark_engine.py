@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 from pyspark.sql import SparkSession, DataFrame
 import uuid
-from pyspark.sql.functions import col, lit, current_timestamp, from_unixtime, to_timestamp, udf, regexp_replace, when
+from pyspark.sql.functions import col, lit, current_timestamp, from_unixtime, to_timestamp, udf, regexp_replace, when, try_to_timestamp
 from pyspark.sql.types import StructType, StructField, StringType, TimestampType, LongType, DecimalType, IntegerType, BooleanType
 import json
 from datetime import datetime
@@ -20,8 +20,8 @@ class SparkDataEngine(BaseDataEngine):
             .master(master) \
             .config("spark.sql.legacy.timeParserPolicy", "LEGACY") \
             .config("spark.sql.session.timeZone", "UTC") \
-            .config("spark.driver.memory", config.get("spark_driver_memory", "4g")) \
-            .config("spark.executor.memory", config.get("spark_executor_memory", "4g")) \
+            .config("spark.driver.memory", config.get("spark_driver_memory", "12g")) \
+            .config("spark.executor.memory", config.get("spark_executor_memory", "12g")) \
             .getOrCreate()
         self.spark.sparkContext.setLogLevel("WARN") # Reduce verbosity
         self.uuid_udf = udf(generate_uuid, StringType())
@@ -45,7 +45,7 @@ class SparkDataEngine(BaseDataEngine):
         
         # Convert created_at to TimestampType and rename to interaction_timestamp
         df = df.withColumn("interaction_timestamp", 
-                           to_timestamp(col("created_at"), "EEE MMM dd HH:mm:ss Z yyyy"))
+                           try_to_timestamp(col("created_at"), lit("EEE MMM dd HH:mm:ss Z yyyy")))
         
         # Drop the original created_at column
         df = df.drop("created_at")

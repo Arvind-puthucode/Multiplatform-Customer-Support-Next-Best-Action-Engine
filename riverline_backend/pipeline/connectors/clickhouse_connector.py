@@ -324,9 +324,9 @@ class ClickHouseConnector(DatabaseConnector):
     def fetch_interactions(self) -> List[Dict]:
         try:
             result = self.client.query("SELECT * FROM interactions")
-            if result.row_count == 0:
+            if not result.result_rows:
                 return []
-            columns = [col.name for col in result.columns]
+            columns = result.column_names
             return [dict(zip(columns, row)) for row in result.result_rows]
         except Exception as e:
             print(f"Error fetching interactions from ClickHouse: {e}")
@@ -335,9 +335,9 @@ class ClickHouseConnector(DatabaseConnector):
     def fetch_customer_profiles(self) -> List[Dict]:
         try:
             result = self.client.query("SELECT * FROM customer_profiles") # Assuming customer_profiles table exists in ClickHouse
-            if result.row_count == 0:
+            if not result.result_rows:
                 return []
-            columns = [col.name for col in result.columns]
+            columns = result.column_names
             return [dict(zip(columns, row)) for row in result.result_rows]
         except Exception as e:
             print(f"Error fetching customer profiles from ClickHouse: {e}")
@@ -355,10 +355,34 @@ class ClickHouseConnector(DatabaseConnector):
                     elif isinstance(value, dict):
                         processed_record[key] = json.dumps(value)
                 processed_records.append(processed_record)
-            self.client.insert('conversations', processed_records)
+            
+            column_names = [
+                'conversation_id', 'customer_id', 'brand_account_id', 'conversation_start_timestamp',
+                'conversation_end_timestamp', 'total_interactions', 'resolution_status',
+                'customer_sentiment_score', 'conversation_topic', 'channel_mix', 'created_at'
+            ]
+            data_to_insert = []
+            for record in processed_records:
+                row = [
+                    record.get('conversation_id'),
+                    record.get('customer_id'),
+                    record.get('brand_account_id'),
+                    record.get('conversation_start_timestamp'),
+                    record.get('conversation_end_timestamp'),
+                    record.get('total_interactions'),
+                    record.get('resolution_status'),
+                    record.get('customer_sentiment_score'),
+                    record.get('conversation_topic'),
+                    record.get('channel_mix'),
+                    record.get('created_at')
+                ]
+                data_to_insert.append(row)
+            self.client.insert('conversations', data_to_insert, column_names=column_names)
             return True
         except Exception as e:
             print(f"Error batch inserting conversations to ClickHouse: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def batch_insert_customer_profiles(self, records: List[Dict]) -> bool:
@@ -373,8 +397,32 @@ class ClickHouseConnector(DatabaseConnector):
                     elif isinstance(value, dict):
                         processed_record[key] = json.dumps(value)
                 processed_records.append(processed_record)
-            self.client.insert('customer_profiles', processed_records)
+            
+            column_names = [
+                'customer_id', 'platform_accounts', 'interaction_history_summary',
+                'behavioral_tags', 'preferred_channels', 'avg_response_time',
+                'total_conversations', 'resolution_rate', 'last_interaction_timestamp',
+                'created_at'
+            ]
+            data_to_insert = []
+            for record in processed_records:
+                row = [
+                    record.get('customer_id'),
+                    record.get('platform_accounts'),
+                    record.get('interaction_history_summary'),
+                    record.get('behavioral_tags'),
+                    record.get('preferred_channels'),
+                    record.get('avg_response_time'),
+                    record.get('total_conversations'),
+                    record.get('resolution_rate'),
+                    record.get('last_interaction_timestamp'),
+                    record.get('created_at')
+                ]
+                data_to_insert.append(row)
+            self.client.insert('customer_profiles', data_to_insert, column_names=column_names)
             return True
         except Exception as e:
             print(f"Error batch inserting customer profiles to ClickHouse: {e}")
+            import traceback
+            traceback.print_exc()
             return False

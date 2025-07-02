@@ -172,7 +172,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the Riverline data pipeline.")
-    parser.add_argument("--data_file", type=str, default="/home/arvind/personal-projects/riverline/backend/riverline_backend/data/10/sample.csv",
+    parser.add_argument("--data_file", type=str, default="/home/arvind/personal-projects/riverline/backend/riverline_backend/data/10/twcs/twcs.csv",
                         help="Path to the input CSV data file.")
     parser.add_argument("--db", type=str, default="supabase", choices=["supabase", "clickhouse"],
                         help="Database target: 'supabase' or 'clickhouse'.")
