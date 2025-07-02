@@ -31,26 +31,29 @@ class NBAEngine:
             return float(obj)
         return obj
 
-    def _enhance_with_llm(self, rule_output: Dict, conversation_context: Dict) -> Dict:
+    def _enhance_with_llm(self, rule_output: Dict, conversation_context: Dict,customer_id) -> Dict:
         # Convert any Decimal objects in conversation_context to floats
         processed_conversation_context = self._convert_decimals_to_floats(conversation_context)
         prompt = f"""
-        Based on this customer support conversation, improve the message and reasoning.
+        You are an AI assistant for Riverline, tasked with determining the Next Best Action for open customer issues.
         
+        Based on the following customer context and a rule-based decision, generate a concise, personalized message for the customer and a detailed, crisp reasoning for the chosen action.
+        
+        Customer ID: {customer_id}
         Conversation Summary: {processed_conversation_context.get('summary', '')}
         Rule-based Decision: {rule_output['channel']} - {rule_output['reasoning']}
         
-        Generate:
-        1. A more personalized message for the customer.
-        2. Enhanced reasoning explaining why this channel/timing is best.
+        Instructions:
+        1.  **Message (for the customer):** Create a personalized, concise, and helpful message. Use the provided Customer ID instead of a generic name placeholder. The message should clearly communicate the next step or acknowledgment.
+        2.  **Reasoning (for internal use):** Provide a detailed and crisp explanation of *why* this channel and timing are best for this specific customer and issue. This reasoning should be insightful enough to help improve future rules and prompts. Focus on the underlying logic and customer behavior.
         
-        Keep the same channel choice. Be concise and helpful.
+        Keep the same channel choice as the rule-based decision.
         
         Respond ONLY with a JSON object containing two keys: "message" and "reasoning".
         Example:
         {{
-            "message": "Your personalized message here.",
-            "reasoning": "Your enhanced reasoning here."
+            "message": "Your personalized message here, using Customer ID {customer_id}.",
+            "reasoning": "Detailed and crisp explanation of the decision, highlighting key factors from the conversation and customer behavior."
         }}
         """
         
@@ -93,8 +96,9 @@ class NBAEngine:
         # 2. Rule-based Decision
         rule_output = determine_channel_and_timing(customer_profile, conversation_history)
 
+        print( )
         # 3. LLM Enhancement
-        enhanced_output = self._enhance_with_llm(rule_output, conversation_summary)
+        enhanced_output = self._enhance_with_llm(rule_output, conversation_summary,customer_id)
 
         # Combine results
         prediction = {

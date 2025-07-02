@@ -381,7 +381,7 @@ class ClickHouseConnector(DatabaseConnector):
             return None
     def fetch_customer_interactions(self, customer_id: str) -> List[Dict]:
         try:
-            query = f"SELECT * FROM interactions WHERE external_id = '{customer_id}'"
+            query = f"SELECT * FROM interactions WHERE participant_external_id = '{customer_id}'"
             result = self.client.query(query)
             if not result.result_rows:
                 return []
