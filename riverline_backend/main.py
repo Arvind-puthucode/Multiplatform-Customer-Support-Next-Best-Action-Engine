@@ -151,7 +151,8 @@ class Pipeline:
         customer_profiles = self.db_connector.fetch_customer_profiles(limit=limit_customers)
         
         nba_engine = NBAEngine(self.db_connector)
-        predictions = []
+        all_customer_data = []
+        resolved_customers_count = 0
         
         print(f"Processing NBA predictions for {len(customer_profiles)} customers...")
         
@@ -159,8 +160,22 @@ class Pipeline:
             customer_id = customer_profile.get('customer_id')
             
             try:
+                conversation_summary = self.db_connector.fetch_customer_conversation(customer_id)
+                if not isinstance(conversation_summary, dict):
+                    conversation_summary = {}
+
+                if conversation_summary.get('resolution_status') == 'resolved':
+                    resolved_customers_count += 1
+                    continue # Skip resolved issues
+
+                conversation_history = self.db_connector.fetch_customer_interactions(customer_id)
+
                 prediction = nba_engine.predict_for_customer(customer_id)
-                predictions.append(prediction)
+                all_customer_data.append({
+                    'prediction': prediction,
+                    'conversation_summary': conversation_summary,
+                    'conversation_history': conversation_history
+                })
                 
                 if (i + 1) % 100 == 0:
                     print(f"Processed {i + 1}/{len(customer_profiles)} customers")
@@ -169,20 +184,52 @@ class Pipeline:
                 print(f"Error processing customer {customer_id}: {e}")
                 continue
         
-        # Export results
-        if predictions:
-            self.export_predictions_csv(predictions)
-            print(f"NBA predictions exported for {len(predictions)} customers")
-        
-        return predictions
+        print(f"Skipped {resolved_customers_count} customers with 'resolved' issues.")
 
-    def export_predictions_csv(self, predictions: List[Dict]):
-        # Simple CSV export for now
-        if not predictions:
+        # Export results
+        if all_customer_data:
+            self.export_predictions_csv(all_customer_data)
+            print(f"NBA predictions exported for {len(all_customer_data)} customers")
+        
+        return all_customer_data
+
+    def export_predictions_csv(self, all_customer_data: List[Dict]):
+        if not all_customer_data:
             print("No predictions to export.")
             return
-        
-        df = pd.DataFrame(predictions)
+
+        processed_data = []
+
+        for item in all_customer_data:
+            prediction = item['prediction']
+            conversation_summary = item.get('conversation_summary', '')
+            conversation_history = item.get('conversation_history', [])
+
+            # Generate chat_log
+            chat_log = ""
+            if conversation_history:
+                for interaction in conversation_history:
+                    participant = interaction.get('participant_external_id', 'Unknown')
+                    content = interaction.get('content_text', '')
+                    chat_log += f"{participant}: {content}\n"
+
+            # Determine issue_status
+            issue_status = "pending_customer_response"  # Default
+            if prediction.get('channel') == 'scheduling_phone_call':
+                issue_status = "escalated"
+            # Add more rules for issue_status based on your logic
+
+            processed_data.append({
+                'customer_id': prediction.get('customer_id'),
+                'chat_log': chat_log.strip(),
+                'channel': prediction.get('channel'),
+                'message': prediction.get('message'),
+                'send_time': prediction.get('send_time'),
+                'reasoning': prediction.get('reasoning'),
+                'issue_status': issue_status
+            })
+
+        df = pd.DataFrame(processed_data)
         output_path = "nba_predictions.csv"
         df.to_csv(output_path, index=False)
         print(f"Predictions exported to {output_path}")
