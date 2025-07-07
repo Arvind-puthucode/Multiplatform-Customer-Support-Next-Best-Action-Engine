@@ -16,8 +16,8 @@ To get the Riverline Backend up and running, follow these steps:
 
 2.  **Clone the repository:**
     ```bash
-    git clone https://github.com/Arvind-puthucode/Riverline-backend.git
-    cd Riverline-backend/
+    git clone git@github.com:Arvind-puthucode/Multiplatform-Customer-Support-Next-Best-Action-Engine.git
+    cd Multiplatform-Customer-Support-Next-Best-Action-Engine/
     ```
 
 3.  **Install Dependencies:**
