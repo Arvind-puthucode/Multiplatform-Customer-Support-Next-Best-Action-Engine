@@ -1,4 +1,4 @@
-# Riverline NBA
+# Customer Support Next Best Action (NBA) Engine
 
 This repository contains the backend services for the Riverline project, focusing on a robust data ingestion pipeline and Next Best Action (NBA) analytics.
 
